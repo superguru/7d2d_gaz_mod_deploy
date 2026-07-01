@@ -1,0 +1,59 @@
+# gzdeploy.yaml - GAZ Mod Deploy configuration
+#
+# Config file search order (first found wins):
+#   1. Path given via --config <file>
+#   2. gzdeploy.yaml in the current working directory  (e.g. the MSBuild project dir)
+#   3. gzdeploy.yaml next to deploy_target_build.py    (this file — global fallback)
+#
+# CLI positional arguments (ModName, BuildTarget, OutputDir, ProjectDir) always
+# override the values below.  When called from MSBuild with all four args, the
+# four keys under "Required" are effectively ignored — only the flags and file
+# lists take effect.  You can still omit them here safely.
+#
+# Usage with no CLI args:  python deploy_target_build.py
+# Usage overriding target: python deploy_target_build.py MyMod Release
+
+# --- Required (must be supplied here or as CLI positional arguments) ---
+#
+# output_dir supports a {build_target} placeholder, e.g. "bin/{build_target}".
+# If output_dir is omitted entirely it defaults to "bin/<BuildTarget>".
+# This means a single YAML file works for both Debug and Release — only
+# build_target (or its CLI equivalent) needs to change per build.
+#
+# Minimal MSBuild command when this file is project-specific:
+#   deploy_target_build.py --config "$(ProjectDir)gzdeploy.yaml" $(Configuration)
+
+mod_name: MyMod            # Name used for DLL/PDB filenames and deploy folder
+build_target: Debug        # Debug | Release  (overridden by CLI when passed from MSBuild)
+output_dir: bin/{build_target}  # {build_target} is substituted at runtime; omit to auto-derive
+project_dir: ./            # Root of the mod project (contains ModPackage/)
+
+# --- Flags (all default to false) ---
+
+clean: false    # Wipe the deploy directory before copying
+force: false    # Copy all package files regardless of modification time
+no_pause: false # Skip the keypress pause when errors occur
+verbose: false  # Show detailed output for every file operation
+
+# --- File copy behaviour ---
+
+# Patterns listed here are always copied regardless of modification time.
+# Uses fnmatch syntax (e.g. *.png, *.xml, Config/*.xml).
+always_copy_masks:
+  - "*.png"
+
+# Extra files from output_dir (filenames or glob patterns).
+# Copied with the same "always overwrite" rule as DLL/PDB.
+# Examples: "SomeLib.dll", "*.config", "*Helper*.dll"
+# additional_output_files:
+#   - "SomeLib.dll"
+
+# Extra files from anywhere on disk (absolute paths, or relative to project_dir).
+# Glob wildcards are supported in the filename part.
+# Copied with the same "always overwrite" rule as DLL/PDB.
+# Examples:
+#   - "C:/some/shared/lib/SharedHelper.dll"   # absolute
+#   - "libs/Newtonsoft.Json.dll"              # relative to project_dir
+#   - "C:/tools/configs/*.config"             # glob
+# additional_files:
+#   - "C:/path/to/file.dll"
