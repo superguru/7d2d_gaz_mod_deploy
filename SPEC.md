@@ -195,7 +195,22 @@ target would be:
 Because all required values (except `BuildTarget`) come from YAML, the same
 MSBuild invocation works for every mod that ships its own `gzdeploy.yaml`.
 
-## 11. Dependencies
+## 11. MSBuild excerpt from real project
+
+```xml
+  <PropertyGroup>
+    <DeployScriptScriptFullDir>$(MSBuildProjectDirectory)\..\..\GAZ Mod Deploy</DeployScriptScriptFullDir>
+  </PropertyGroup>
+  <Target Name="DeployMod" AfterTargets="Build">
+    <Message Text="Executing mod deployment task" Importance="High" />
+    <Exec Command="python &quot;$(DeployScriptScriptFullDir)\deploy_target_build.py&quot; --config &quot;$(ProjectDir)\gzdeploy.yaml&quot; &quot;$(Configuration)&quot;" ContinueOnError="true" WorkingDirectory="$(ProjectDir)">
+      <Output TaskParameter="ExitCode" PropertyName="DeployModExitCode" />
+    </Exec>
+    <Error Condition="'$(DeployModExitCode)' != '0'" Text="Deployment failed with exit code $(DeployModExitCode)" />
+  </Target>
+```
+
+## 12. Dependencies
 
 - Python 3.10+ (uses structural pattern matching-friendly idioms; should run on
   3.7+ in practice).
