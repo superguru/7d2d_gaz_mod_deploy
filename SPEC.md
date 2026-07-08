@@ -75,7 +75,7 @@ The first match wins:
 | `additional_output_files` | list[string] | no | Extra filenames or globs copied from `output_dir` (always overwritten, same rule as DLL/PDB). |
 | `additional_files` | list[string] | no | Extra files from any location — absolute paths, or paths relative to `project_dir`. Globs supported. |
 
-### 4.3 `{key}` substitution
+### 4.3 `{`key`}` substitution
 
 Any string value in the YAML may reference the four core values using
 `{mod_name}`, `{build_target}`, `{output_dir}`, or `{project_dir}`.
