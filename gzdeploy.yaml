@@ -5,27 +5,36 @@
 #   2. gzdeploy.yaml in the current working directory  (e.g. the MSBuild project dir)
 #   3. gzdeploy.yaml next to deploy_target_build.py    (this file — global fallback)
 #
-# CLI positional arguments (ModName, BuildTarget, OutputDir, ProjectDir) always
-# override the values below.  When called from MSBuild with all four args, the
-# four keys under "Required" are effectively ignored — only the flags and file
-# lists take effect.  You can still omit them here safely.
+# The only CLI positional argument is BuildTarget, which overrides
+# build_target below when supplied.  mod_name, output_dir, and project_dir
+# MUST be supplied via this file — they have no CLI equivalent.
+#
+# Flags (--clean, --force, --no-pause, --verbose) always override the
+# matching key below when present on the command line; otherwise the YAML
+# value is used.
+#
+# {key} substitution: any string value in this file may reference the four
+# core values using {mod_name}, {build_target}, {output_dir}, or
+# {project_dir}.  Cross-references between core values are resolved
+# iteratively (e.g. project_dir: "{mod_name}_src" with mod_name: MyMod
+# gives project_dir = "MyMod_src").  Unresolved placeholders are left
+# unchanged.
 #
 # Usage with no CLI args:  python deploy_target_build.py
-# Usage overriding target: python deploy_target_build.py MyMod Release
+# Usage overriding target: python deploy_target_build.py Release
+# Usage with custom config: python deploy_target_build.py --config path/to/gzdeploy.yaml Debug
 
-# --- Required (must be supplied here or as CLI positional arguments) ---
+# --- Required (must be supplied here; BuildTarget may also be a CLI arg) ---
 #
-# output_dir supports a {build_target} placeholder, e.g. "bin/{build_target}".
-# If output_dir is omitted entirely it defaults to "bin/<BuildTarget>".
-# This means a single YAML file works for both Debug and Release — only
-# build_target (or its CLI equivalent) needs to change per build.
+# These four keys are substitutable everywhere else in this file via
+# {mod_name}, {build_target}, {output_dir}, {project_dir}.
 #
 # Minimal MSBuild command when this file is project-specific:
 #   deploy_target_build.py --config "$(ProjectDir)gzdeploy.yaml" $(Configuration)
 
 mod_name: MyMod            # Name used for DLL/PDB filenames and deploy folder
-build_target: Debug        # Debug | Release  (overridden by CLI when passed from MSBuild)
-output_dir: bin/{build_target}  # {build_target} is substituted at runtime; omit to auto-derive
+build_target: Debug        # Debug | Release  (overridden by CLI BuildTarget)
+output_dir: bin/{build_target}  # {build_target} is substituted at runtime
 project_dir: ./            # Root of the mod project (contains ModPackage/)
 
 # --- Flags (all default to false) ---

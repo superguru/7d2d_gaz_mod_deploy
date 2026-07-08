@@ -39,6 +39,7 @@ import zipfile
 import fnmatch
 from pathlib import Path
 from datetime import datetime
+from typing import Any, Dict, cast
 
 try:
     import yaml
@@ -85,6 +86,65 @@ def load_yaml_config(config_path):
     except Exception as e:
         print(f"Warning: Failed to load config '{config_path}': {e}")
         return {}
+
+
+def substitute_yaml_value(value, substitutions):
+    """
+    Replace {key} placeholders in a string with values from substitutions.
+
+    Unknown placeholders (keys not present in substitutions, or whose value
+    is None) are left unchanged.  Non-string values are returned as-is.
+    """
+    if not isinstance(value, str):
+        return value
+    result = value
+    for key, sub_value in substitutions.items():
+        if sub_value is not None:
+            result = result.replace("{" + key + "}", str(sub_value))
+    return result
+
+
+def substitute_yaml_values(config, substitutions):
+    """
+    Recursively apply {key} substitution to all string values in a YAML
+    structure (dicts, lists, and scalars).
+    """
+    if isinstance(config, dict):
+        return {k: substitute_yaml_values(v, substitutions) for k, v in config.items()}
+    if isinstance(config, list):
+        return [substitute_yaml_values(item, substitutions) for item in config]
+    return substitute_yaml_value(config, substitutions)
+
+
+def resolve_core_values(yaml_config, cli_build_target=None):
+    """
+    Resolve the four substitutable core values (mod_name, build_target,
+    output_dir, project_dir) by iteratively substituting {key} placeholders.
+
+    CLI build_target (when provided) overrides the YAML build_target as
+    the starting value.  Iterative resolution handles cross-references such
+    as ``project_dir: "{mod_name}_src"`` with ``mod_name: MyMod``.
+    """
+    substitutions = {
+        "mod_name": yaml_config.get("mod_name"),
+        "build_target": cli_build_target
+        if cli_build_target is not None
+        else yaml_config.get("build_target"),
+        "output_dir": yaml_config.get("output_dir"),
+        "project_dir": yaml_config.get("project_dir"),
+    }
+
+    for _ in range(10):
+        changed = False
+        for key in list(substitutions.keys()):
+            new_value = substitute_yaml_value(substitutions[key], substitutions)
+            if new_value != substitutions[key]:
+                substitutions[key] = new_value
+                changed = True
+        if not changed:
+            break
+
+    return substitutions
 
 
 def get_assembly_version_via_reflection(dll_path):
@@ -612,7 +672,9 @@ def ensure_directory_exists(directory_path, stats):
         raise OSError(f"Failed to create directory {directory_path}: {e}")
 
 
-def copy_assembly_files(output_dir, deploy_dir, build_target, stats, additional_files=None):
+def copy_assembly_files(
+    output_dir, deploy_dir, build_target, stats, additional_files=None
+):
     """
     Copy assembly files (.dll and .pdb for Debug) from output directory to deployment directory.
     Optionally copies extra files/patterns from output_dir specified via additional_files.
@@ -659,7 +721,9 @@ def copy_assembly_files(output_dir, deploy_dir, build_target, stats, additional_
             matches = sorted(output_path.glob(pattern))
             if not matches:
                 print(f"Warning: No files matched '{pattern}' in {output_dir}")
-                stats.assembly_failed(os.path.join(output_dir, pattern), "No files matched pattern")
+                stats.assembly_failed(
+                    os.path.join(output_dir, pattern), "No files matched pattern"
+                )
                 continue
             for match in matches:
                 source_file = str(match)
@@ -904,7 +968,9 @@ def main():
         elif _script_config.exists():
             config_path = str(_script_config)
         else:
-            config_path = DEFAULT_CONFIG_FILE  # neither exists; load_yaml_config returns {}
+            config_path = (
+                DEFAULT_CONFIG_FILE  # neither exists; load_yaml_config returns {}
+            )
 
     yaml_config = load_yaml_config(config_path)
 
@@ -916,7 +982,7 @@ def main():
     parser = argparse.ArgumentParser(
         description=f"Deploy Target Build Script - deploys {MOD_NAME} mod to target-specific directory",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
+        epilog="""
 Examples:
   %(prog)s Debug
   %(prog)s Release
@@ -947,6 +1013,10 @@ Config file (gzdeploy.yaml) keys:
   mod_name, build_target, output_dir, project_dir,
   clean, force, no_pause, verbose, always_copy_masks,
   additional_output_files, additional_files
+
+Any string value may reference the four core values via {mod_name},
+{build_target}, {output_dir}, or {project_dir}.  Cross-references
+(e.g. project_dir: "{mod_name}_src") are resolved iteratively.
         """,
     )
 
@@ -1001,17 +1071,22 @@ Config file (gzdeploy.yaml) keys:
     except SystemExit:
         return 1
 
-    # Resolve required values: BuildTarget may come from CLI or YAML;
-    # mod_name, output_dir, and project_dir must come from gzdeploy.yaml.
-    if args.BuildTarget is None:
-        args.BuildTarget = yaml_config.get("build_target")
-    args.ModName = yaml_config.get("mod_name")
-    args.OutputDir = yaml_config.get("output_dir")
-    args.ProjectDir = yaml_config.get("project_dir")
+    # Resolve the four substitutable core values (mod_name, build_target,
+    # output_dir, project_dir).  CLI build_target overrides the YAML value;
+    # cross-references between core values (e.g. project_dir: "{mod_name}_src")
+    # are resolved iteratively.
+    core_values = resolve_core_values(yaml_config, cli_build_target=args.BuildTarget)
+    args.BuildTarget = core_values["build_target"]
+    args.ModName = core_values["mod_name"]
+    args.OutputDir = core_values["output_dir"]
+    args.ProjectDir = core_values["project_dir"]
 
-    # Support a {build_target} placeholder in output_dir (e.g. "bin/{build_target}").
-    if args.BuildTarget and args.OutputDir and "{build_target}" in args.OutputDir:
-        args.OutputDir = args.OutputDir.replace("{build_target}", args.BuildTarget)
+    # Apply {key} substitution to all string values in the YAML config so
+    # entries like always_copy_masks, additional_files, and
+    # additional_output_files can reference the resolved core values.
+    # yaml.safe_load always returns a dict for our config file; cast tells
+    # the type checker to keep that assumption.
+    yaml_config = cast(Dict[str, Any], substitute_yaml_values(yaml_config, core_values))
 
     # Validate that all required fields are now resolved.
     missing = [
@@ -1144,7 +1219,13 @@ Config file (gzdeploy.yaml) keys:
         ensure_directory_exists(deploy_dir, stats)
 
         # Copy assembly files first (always overwrite)
-        copy_assembly_files(str(output_path), deploy_dir, args.BuildTarget, stats, args.additional_output_files)
+        copy_assembly_files(
+            str(output_path),
+            deploy_dir,
+            args.BuildTarget,
+            stats,
+            args.additional_output_files,
+        )
 
         # Copy arbitrary additional files from any location (YAML-only, always overwrite)
         copy_additional_files(additional_files, deploy_dir, str(project_path), stats)
