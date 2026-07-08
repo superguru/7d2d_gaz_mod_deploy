@@ -2,10 +2,11 @@
 """
 Deploy Target Build Script
 
-This script takes three command-line arguments:
+This script takes one command-line argument:
 1. BuildTarget - The build configuration target (e.g., Debug, Release)
-2. OutputDir - The output directory containing the built assemblies
-3. ProjectDir - The project directory path
+
+All other configuration (mod_name, output_dir, project_dir,
+additional_output_files, etc.) must be supplied via gzdeploy.yaml.
 
 The script:
 1. Always copies <ModName>.dll from OutputDir to deployment directory (overwrites)
@@ -21,12 +22,12 @@ By default, only files that are newer in the source than in the target will be c
 Files matching ALWAYS_COPY_MASKS patterns are always copied regardless of modification time.
 
 Usage:
-    python deploy_target_build.py <ModName> <BuildTarget> <OutputDir> <ProjectDir>
+    python deploy_target_build.py <BuildTarget> [--config <yaml>]
 
 Examples: (keep the dir names generic)
-    python deploy_target_build.py MyMod Debug "bin/Debug" "D:/Projects/ModName"
-    python deploy_target_build.py MyMod Release "bin/Release" "C:/Source/ModSource"
-    python deploy_target_build.py MyMod Debug "bin/Debug" "D:/Projects/ModName" --clean --force
+    python deploy_target_build.py Debug --config gzdeploy.yaml
+    python deploy_target_build.py Release --config gzdeploy.yaml
+    python deploy_target_build.py Debug --config gzdeploy.yaml --clean --force
 """
 
 import sys
@@ -46,8 +47,8 @@ try:
 except ImportError:
     YAML_AVAILABLE = False
 
-# Configuration - MOD_NAME is set from the first command-line argument in main()
-MOD_NAME = ""  # Set at runtime from args.ModName
+# Configuration - MOD_NAME is set from gzdeploy.yaml in main()
+MOD_NAME = ""  # Set at runtime from yaml_config["mod_name"]
 
 # File masks that should always be copied regardless of modification time
 ALWAYS_COPY_MASKS = ["*.png"]
@@ -907,12 +908,8 @@ def main():
 
     yaml_config = load_yaml_config(config_path)
 
-    # Pre-extract ModName for help text (YAML or first positional, whichever is available).
-    _mod_name_preview = yaml_config.get("mod_name") or (
-        sys.argv[1]
-        if len(sys.argv) > 1 and not sys.argv[1].startswith("-")
-        else "<ModName>"
-    )
+    # Pre-extract ModName for help text (from YAML only).
+    _mod_name_preview = yaml_config.get("mod_name") or "<ModName>"
     MOD_NAME = _mod_name_preview
 
     # Create argument parser
@@ -921,13 +918,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Examples:
-  %(prog)s {_mod_name_preview} Debug "bin/Debug" "D:/Projects/ModName"
-  %(prog)s {_mod_name_preview} Release "bin/Release" "C:/Source/ModSource"
-  %(prog)s {_mod_name_preview} Debug "bin/Debug" "D:/Projects/ModName" --clean
-  %(prog)s {_mod_name_preview} Debug "bin/Debug" "D:/Projects/ModName" --force
-  %(prog)s {_mod_name_preview} Debug "bin/Debug" "D:/Projects/ModName" --clean --force
-  %(prog)s {_mod_name_preview} Debug "bin/Debug" "D:/Projects/ModName" --no-pause
-  %(prog)s --config path/to/gzdeploy.yaml
+  %(prog)s Debug
+  %(prog)s Release
+  %(prog)s Debug --config path/to/gzdeploy.yaml
+  %(prog)s Debug --clean --force
+  %(prog)s Debug --no-pause
   %(prog)s  (uses gzdeploy.yaml in current directory)
 
 This script will:
@@ -948,40 +943,20 @@ Use --force to copy all package files regardless of modification time.
 Use --clean to remove all existing files before copying.
 Use --no-pause to skip pausing on errors (default: pause on errors).
 
-Config file (gzdeploy.yaml) keys mirror the argument names:
+Config file (gzdeploy.yaml) keys:
   mod_name, build_target, output_dir, project_dir,
   clean, force, no_pause, verbose, always_copy_masks,
-  additional_output_files
-CLI arguments always override values from the config file.
+  additional_output_files, additional_files
         """,
     )
 
-    # Positional arguments are optional (nargs='?') so they can be omitted
-    # when gzdeploy.yaml supplies the values.  Existing MSBuild usage that
-    # passes all four positionally continues to work unchanged.
-    parser.add_argument(
-        "ModName",
-        nargs="?",
-        default=None,
-        help="Mod name (used for DLL/PDB filenames and deployment directory names)",
-    )
-
+    # BuildTarget is the only positional argument; mod_name, output_dir, and
+    # project_dir must be supplied via gzdeploy.yaml.
     parser.add_argument(
         "BuildTarget",
         nargs="?",
         default=None,
         help="Build configuration target (e.g., Debug, Release)",
-    )
-
-    parser.add_argument(
-        "OutputDir",
-        nargs="?",
-        default=None,
-        help="Output directory containing built assemblies (e.g., bin/Debug, bin/Release)",
-    )
-
-    parser.add_argument(
-        "ProjectDir", nargs="?", default=None, help="Project directory path"
     )
 
     # Optional flags — defaults come from YAML (or False if absent).
@@ -1014,19 +989,6 @@ CLI arguments always override values from the config file.
     )
 
     parser.add_argument(
-        "--additional-output-file",
-        action="append",
-        dest="additional_output_files",
-        default=None,
-        metavar="FILE",
-        help=(
-            "Extra file or glob pattern from OutputDir to copy to the deploy directory "
-            "(always overwritten, same as DLL/PDB). Can be specified multiple times. "
-            "Also configurable via additional_output_files in gzdeploy.yaml."
-        ),
-    )
-
-    parser.add_argument(
         "--config",
         default=DEFAULT_CONFIG_FILE,
         metavar="FILE",
@@ -1039,53 +1001,34 @@ CLI arguments always override values from the config file.
     except SystemExit:
         return 1
 
-    # YAML-first shorthand: when YAML supplies mod_name and only one positional
-    # was given (landing in ModName slot), treat that value as BuildTarget.
-    # This lets the command line be simply:  script --config file.yaml Debug
-    if (
-        args.ModName is not None
-        and args.BuildTarget is None
-        and args.OutputDir is None
-        and args.ProjectDir is None
-        and yaml_config.get("mod_name")
-    ):
-        args.BuildTarget = args.ModName
-        args.ModName = None
-
-    # Fill positional args from YAML for any that were not supplied on the CLI.
-    if args.ModName is None:
-        args.ModName = yaml_config.get("mod_name")
+    # Resolve required values: BuildTarget may come from CLI or YAML;
+    # mod_name, output_dir, and project_dir must come from gzdeploy.yaml.
     if args.BuildTarget is None:
         args.BuildTarget = yaml_config.get("build_target")
-    if args.OutputDir is None:
-        args.OutputDir = yaml_config.get("output_dir")
-    if args.ProjectDir is None:
-        args.ProjectDir = yaml_config.get("project_dir")
+    args.ModName = yaml_config.get("mod_name")
+    args.OutputDir = yaml_config.get("output_dir")
+    args.ProjectDir = yaml_config.get("project_dir")
 
-    # Resolve output_dir once build_target is known.
-    # Supports a {build_target} placeholder (e.g. "bin/{build_target}") and
-    # auto-derives "bin/<BuildTarget>" when output_dir is omitted entirely.
-    if args.BuildTarget:
-        if args.OutputDir is None:
-            args.OutputDir = f"bin/{args.BuildTarget}"
-        elif "{build_target}" in args.OutputDir:
-            args.OutputDir = args.OutputDir.replace("{build_target}", args.BuildTarget)
+    # Support a {build_target} placeholder in output_dir (e.g. "bin/{build_target}").
+    if args.BuildTarget and args.OutputDir and "{build_target}" in args.OutputDir:
+        args.OutputDir = args.OutputDir.replace("{build_target}", args.BuildTarget)
 
     # Validate that all required fields are now resolved.
     missing = [
         name
         for name, val in [
-            ("ModName", args.ModName),
-            ("BuildTarget", args.BuildTarget),
-            ("OutputDir", args.OutputDir),
-            ("ProjectDir", args.ProjectDir),
+            ("mod_name", args.ModName),
+            ("build_target", args.BuildTarget),
+            ("output_dir", args.OutputDir),
+            ("project_dir", args.ProjectDir),
         ]
         if not val
     ]
     if missing:
         parser.error(
-            f"Missing required value(s): {', '.join(missing)}. "
-            "Provide them as positional arguments or in gzdeploy.yaml."
+            f"Missing required value(s) in gzdeploy.yaml: {', '.join(missing)}. "
+            "Provide build_target as a positional argument (or in YAML) and "
+            "mod_name, output_dir, and project_dir in gzdeploy.yaml."
         )
 
     # Apply always_copy_masks from YAML (only if YAML provided the key).
@@ -1094,12 +1037,9 @@ CLI arguments always override values from the config file.
         if isinstance(masks, list):
             ALWAYS_COPY_MASKS[:] = masks
 
-    # Merge additional_output_files: CLI entries first, then any YAML entries not already present.
-    cli_extra = args.additional_output_files or []
+    # additional_output_files comes from YAML only (no CLI option).
     yaml_extra = yaml_config.get("additional_output_files") or []
-    if not isinstance(yaml_extra, list):
-        yaml_extra = []
-    args.additional_output_files = cli_extra + [f for f in yaml_extra if f not in cli_extra]
+    args.additional_output_files = yaml_extra if isinstance(yaml_extra, list) else []
 
     # Set the global MOD_NAME from the resolved argument
     MOD_NAME = args.ModName
