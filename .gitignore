@@ -1,0 +1,61 @@
+# Also see: https://github.com/github/gitignore
+
+# Visual Studio Code and other IDEs
+.vs/
+.vscode/
+.idea/
+
+# Deployment and packaging output
+publish/backups/
+# publish/dev/ <- Development publish folder is now tracked for testing purposes
+publish/dev/.2*/
+publish/packages/
+publish/staging/
+publish/prod/
+
+# Backup configuration files
+*.ini.backup.*
+*.toml.backup.*
+*backup*.zip
+
+# Deployment configuration (contains sensitive credentials)
+deploy.config
+deploy.toml
+config/deploy.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Tool caches
+.ruff_cache/
+.npm/
+node_modules/
+jspm_packages/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log*
+
+# Special development files
+dev/00TODO/
+dev/00TODO_DONE/
+gzlint-issues.txt
+prompts.txt
+recommendations.txt
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Generated files from composition
+src/index.html
